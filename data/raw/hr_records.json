@@ -1,0 +1,42 @@
+[
+    {
+        "employee_id": "E001",
+        "name": "Sarah Chen",
+        "title": "VP of Engineering",
+        "department": "Engineering",
+        "salary": 250000,
+        "start_date": "2019-03-15"
+    },
+    {
+        "employee_id": "E002",
+        "name": "Marcus Rivera",
+        "title": "Engineering Manager",
+        "department": "Engineering",
+        "salary": 180000,
+        "start_date": "2020-07-01"
+    },
+    {
+        "employee_id": "E003",
+        "name": "Priya Patel",
+        "title": "Software Engineer",
+        "department": "Engineering",
+        "salary": 145000,
+        "start_date": "2022-01-10"
+    },
+    {
+        "employee_id": "E004",
+        "name": "David Kim",
+        "title": "Software Engineer",
+        "department": "Engineering",
+        "salary": 140000,
+        "start_date": "2022-06-20"
+    },
+    {
+        "employee_id": "E005",
+        "name": "Lisa Thompson",
+        "title": "HR Business Partner",
+        "department": "Human Resources",
+        "salary": 130000,
+        "start_date": "2021-04-05"
+    }
+]

@@ -1,0 +1,10 @@
+Employee Contact Directory
+
+John Smith - Engineering Lead
+Email: john.smith@company.com
+Phone: (555) 123-4567
+SSN: 234-56-7890
+
+Alice Johnson - Product Manager
+Email: alice.johnson@company.com
+Phone: (555) 987-6543

@@ -1,0 +1,9 @@
+Employee Benefits Summary
+
+Health insurance premium for Jane Doe (SSN: 123-45-6789):
+  Plan: PPO Gold
+  Monthly premium: $450
+  Deductible: $1,500
+
+Contact benefits@company.com or call (800) 555-0199 for questions.
+Credit card on file for auto-pay: 4532015112830366

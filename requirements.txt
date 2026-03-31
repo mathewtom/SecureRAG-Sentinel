@@ -1,0 +1,11 @@
+langchain
+langchain-community
+chromadb
+sentence-transformers
+langchain-huggingface
+presidio-analyzer
+presidio-anonymizer
+pytest
+pytest-cov
+pypdf
+ollama

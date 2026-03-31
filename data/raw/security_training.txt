@@ -1,0 +1,7 @@
+Annual Security Training Summary
+
+All employees must complete security awareness training by Q4 each year.
+Topics covered: phishing identification, password hygiene, data classification.
+Sensitive data must be encrypted at rest and in transit.
+Report suspicious activity to security@company.com immediately.
+Two-factor authentication is required for all internal systems.

@@ -1,0 +1,6 @@
+New Employee Onboarding Checklist
+
+Day 1: Badge pickup, workstation setup, IT orientation.
+Week 1: Meet your team, review project documentation, complete compliance training.
+Week 2: Shadow a senior team member, set up development environment.
+Month 1: Complete first project milestone, schedule 1-on-1 with manager.
