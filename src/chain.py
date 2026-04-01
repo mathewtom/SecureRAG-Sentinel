@@ -1,5 +1,7 @@
 """RAG chain with security-focused prompt template and Ollama LLM."""
 
+import os
+
 import chromadb
 from langchain_community.llms import Ollama
 from langchain_core.documents import Document
@@ -42,7 +44,8 @@ def build_chain(
     client = chromadb.PersistentClient(path=chroma_persist_dir)
     collection = client.get_collection(name=collection_name)
     embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
-    llm = Ollama(model=model_name)
+    ollama_host = os.environ.get("OLLAMA_HOST")
+    llm = Ollama(model=model_name, **({"base_url": ollama_host} if ollama_host else {}))
 
     retriever = AccessControlledRetriever(
         collection=collection,

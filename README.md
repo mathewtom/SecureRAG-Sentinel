@@ -1,14 +1,31 @@
 # SecureRAG-Sentinel
 
-A security-hardened RAG pipeline that treats the LLM as an untrusted component. Documents are sanitized before they hit the vector store and access-controlled before they reach the model. Built with LangChain, ChromaDB, Presidio, and Ollama (LLaMA 3.1 8B).
+A security-hardened RAG pipeline that treats the LLM as an untrusted component. Documents are sanitized before they hit the vector store and access-controlled before they reach the model. Dockerized for one-command deployment. Built with LangChain, ChromaDB, Presidio, FastAPI, and Ollama (LLaMA 3.1 8B).
 
-## Setup
-
-Requires Python 3.12+ and [Ollama](https://ollama.com).
+## Quick Start (Docker)
 
 ```bash
 git clone https://github.com/mathewtom/SecureRAG-Sentinel.git
 cd SecureRAG-Sentinel
+
+# Start Ollama and pull the model
+docker compose up ollama -d
+docker compose exec ollama ollama pull llama3.1:8b
+
+# Place documents in data/raw/, then ingest
+docker compose run --rm pipeline
+
+# Start the API
+docker compose up api -d
+```
+
+The API serves on `http://localhost:8000`. Pipeline reads documents from `data/raw/` on your host (mounted read-only) and writes embeddings to a shared Docker volume that the API container reads from.
+
+### Local Setup (without Docker)
+
+Requires Python 3.12+ and [Ollama](https://ollama.com).
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -17,17 +34,24 @@ ollama pull llama3.1:8b
 ollama serve
 ```
 
-## Usage
-
-Drop documents (`.txt`, `.pdf`, `.csv`) into `data/raw/`. HR records go in `data/raw/hr_records.json`. Run the ingestion pipeline:
-
 ```bash
-python -m src.pipeline
+python -m src.pipeline                                    # ingest
+uvicorn src.api:app --host 0.0.0.0 --port 8000           # serve
 ```
 
-This loads, chunks, sanitizes, and embeds everything into `chroma_db/`. Injection attempts are quarantined and never stored. PII is redacted in-place before embedding.
+## Usage
 
-To query:
+Drop documents (`.txt`, `.pdf`, `.csv`) into `data/raw/`. HR records go in `data/raw/hr_records.json`. The pipeline loads, chunks, sanitizes, and embeds everything into ChromaDB. Injection attempts are quarantined and never stored. PII is redacted in-place before embedding.
+
+To query via the API:
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is our vacation policy?", "user_id": "E003"}'
+```
+
+Or directly from Python:
 
 ```python
 from src.chain import build_chain
@@ -36,24 +60,16 @@ chain = build_chain()
 result = chain.query("What is our vacation policy?", user_id="E003")
 ```
 
-The `user_id` determines what the retriever is allowed to return. An IC sees policies and their own HR record. A VP sees everything. Unknown users get nothing. Each user is rate-limited to 10 requests per 60-second window by default — configurable via `build_chain(max_requests=, window_seconds=)`. Exceeding the limit raises `RateLimitExceeded` before any retrieval or LLM work happens.
+The `user_id` determines what the retriever is allowed to return. An IC sees policies and their own HR record. A VP sees everything. Unknown users get nothing. Each user is rate-limited to 10 requests per 60-second window by default, configurable via `build_chain(max_requests=, window_seconds=)`.
 
-### API Server
-
-The pipeline also exposes a FastAPI HTTP interface for integration with red-teaming tools (Garak, PromptFoo, etc.):
-
-```bash
-uvicorn src.api:app --host 0.0.0.0 --port 8000
-```
-
-Endpoints:
+### API Endpoints
 
 - `GET /health` — liveness check
 - `POST /query` — accepts `{"question": "...", "user_id": "..."}`, returns answer + source documents. Returns 429 with `Retry-After` header when rate-limited.
 
 ### Tests
 
-Tests run without Ollama (the LLM is mocked, ChromaDB runs in-memory):
+Tests run without Ollama or Docker (the LLM is mocked, ChromaDB runs in-memory):
 
 ```bash
 pytest tests/ -v

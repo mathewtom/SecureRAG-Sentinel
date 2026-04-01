@@ -1,0 +1,14 @@
+.venv
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.pyc
+chroma_db
+reports
+CLAUDE.md
+.idea
+.vscode
+.ruff_cache
+htmlcov
+.coverage
