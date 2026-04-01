@@ -37,8 +37,10 @@ def build_chain(
     collection_name: str = "securerag",
     model_name: str = "llama3.1:8b",
     embedding_model: str = "all-MiniLM-L6-v2",
-    max_requests: int = 10,
-    window_seconds: float = 60,
+    # TEMP: Rate limit relaxed for Garak/PromptFoo security testing.
+    # Production default should be 10 requests per 60 seconds.
+    max_requests: int = 100_000,
+    window_seconds: float = 600,
 ) -> "SecureRAGChain":
     """Build a SecureRAGChain backed by Ollama and ChromaDB."""
     client = chromadb.PersistentClient(path=chroma_persist_dir)

@@ -4,8 +4,10 @@ import time
 from collections import defaultdict
 from threading import Lock
 
-DEFAULT_MAX_REQUESTS = 10
-DEFAULT_WINDOW_SECONDS = 60
+# TEMP: Rate limit relaxed to 100k/10min for Garak/PromptFoo security testing.
+# Production default should be 10 requests per 60 seconds.
+DEFAULT_MAX_REQUESTS = 100_000
+DEFAULT_WINDOW_SECONDS = 600
 
 
 class RateLimitExceeded(Exception):
