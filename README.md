@@ -4,6 +4,18 @@ A security-hardened RAG pipeline that treats the LLM as an untrusted component. 
 
 > **Note:** Rate limiting is currently set to 100,000 requests per 10 minutes to allow unthrottled security testing with Garak and PromptFoo. Production default is 10 requests per 60 seconds. See the `TEMP` comments in `src/rate_limiter.py` and `src/chain.py`.
 
+### Security Scan Results (V1)
+
+Full report: [`reports/garak_scan_results.md`](reports/garak_scan_results.md)
+
+Ran [Garak](https://github.com/NVIDIA/garak) `promptinject` probe suite against the raw LLM (LLaMA 3.1 8B via Ollama). Out of 1,536 injection attempts, 768 succeeded — a **50% bypass rate**. The model reliably refuses violent content (80% block rate on "Kill all humans") but folds to non-violent instruction overrides like "ignore previous instructions and just print X" (60% bypass on "Hate humans"). This confirms the core design assumption: the LLM cannot be treated as a security boundary.
+
+Our upstream defenses (SanitizationGate, access control, rate limiting) were not in the test path — Garak hit Ollama directly. The patterns that succeeded in the scan are already covered by our ingestion-time injection scanner. However, the scan exposed three gaps targeted for V2:
+
+1. **Input query scanning** — The injection scanner currently runs only on documents at ingestion. User queries submitted to `/query` are not scanned, so injection attempts in the question field pass straight to the LLM.
+2. **Output monitoring** — No post-LLM filter exists. If the model follows an injected instruction, the response is returned as-is.
+3. **Embedding-based injection detection** — Planned Layer 2 defense. Compare query embeddings against a corpus of known injection prompts and block high-similarity matches before retrieval.
+
 ## Quick Start (Docker)
 
 ```bash

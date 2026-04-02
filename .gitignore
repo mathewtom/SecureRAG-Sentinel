@@ -77,4 +77,3 @@ dmypy.json
 
 # Project-specific
 chroma_db/
-reports/
