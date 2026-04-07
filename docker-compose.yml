@@ -1,19 +1,18 @@
-services:
-  ollama:
-    image: ollama/ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
+# Ollama runs natively on the host (not in Docker) for direct GPU access.
+# Dockerized Ollama falls back to CPU-only inference, which is too slow
+# for long-prompt probes during security testing.
 
+services:
   pipeline:
     build: .
     command: python -m src.pipeline
     volumes:
       - ./data/raw:/app/data/raw:ro
       - chroma_data:/app/chroma_db
-    depends_on:
-      - ollama
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
     profiles:
       - ingest
 
@@ -23,11 +22,10 @@ services:
       - "8000:8000"
     volumes:
       - chroma_data:/app/chroma_db
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - OLLAMA_HOST=http://ollama:11434
-    depends_on:
-      - ollama
+      - OLLAMA_HOST=http://host.docker.internal:11434
 
 volumes:
-  ollama_data:
   chroma_data:
