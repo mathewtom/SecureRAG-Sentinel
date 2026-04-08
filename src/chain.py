@@ -4,6 +4,9 @@ import os
 import unicodedata
 
 import chromadb
+
+from src.audit import log_denial, new_request_id
+from src.model_integrity import verify_model_digest
 from langchain_community.llms import Ollama
 from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
@@ -64,16 +67,14 @@ def build_chain(
     collection_name: str = "securerag",
     model_name: str = "llama3.1:8b",
     embedding_model: str = "all-MiniLM-L6-v2",
-    # TEMP: Rate limit relaxed for Garak/PromptFoo security testing.
-    # Production default should be 10 requests per 60 seconds.
-    max_requests: int = 100_000,
-    window_seconds: float = 600,
 ) -> "SecureRAGChain":
     """Build a SecureRAGChain backed by Ollama and ChromaDB."""
+    ollama_host = os.environ.get("OLLAMA_HOST")
+    verify_model_digest(model_name, ollama_host=ollama_host)
+
     client = chromadb.PersistentClient(path=chroma_persist_dir)
     collection = client.get_collection(name=collection_name)
     embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
-    ollama_host = os.environ.get("OLLAMA_HOST")
     llm = Ollama(model=model_name, **({"base_url": ollama_host} if ollama_host else {}))
 
     retriever = AccessControlledRetriever(
@@ -85,7 +86,7 @@ def build_chain(
         retriever=retriever,
         llm=llm,
         prompt=PROMPT,
-        rate_limiter=RateLimiter(max_requests, window_seconds),
+        rate_limiter=RateLimiter(),
         injection_scanner=InjectionScanner(threshold=_QUERY_INJECTION_THRESHOLD),
         embedding_detector=EmbeddingInjectionDetector(embedding_function=embeddings),
         output_scanner=OutputScanner(enable_semantic=True),
@@ -127,33 +128,49 @@ class SecureRAGChain:
         user_id: str,
     ) -> dict:
         """Query with full defense stack. Returns answer and source_documents."""
+        request_id = new_request_id()
+
         # NFKC normalization — collapses fullwidth, ligatures, combining chars
         question = unicodedata.normalize("NFKC", question)
 
         # Layer 1: Rate limiting
         if self._rate_limiter:
-            self._rate_limiter.check(user_id)
+            try:
+                self._rate_limiter.check(user_id)
+            except Exception:
+                log_denial(
+                    request_id=request_id, user_id=user_id,
+                    layer="rate_limiter", reason="rate_limit_exceeded",
+                    question=question,
+                )
+                raise
 
         # Layer 2: Input injection scan (regex)
         if self._injection_scanner:
             scan_result = self._injection_scanner.scan(question)
             if scan_result.blocked:
-                raise QueryBlocked(
-                    reason="injection_pattern",
-                    details={"score": scan_result.total_score, "matches": scan_result.matches},
+                details = {"score": scan_result.total_score, "matches": scan_result.matches}
+                log_denial(
+                    request_id=request_id, user_id=user_id,
+                    layer="injection_scanner", reason="injection_pattern",
+                    question=question, details=details,
                 )
+                raise QueryBlocked(reason="injection_pattern", details=details)
 
         # Layer 3: Embedding similarity scan
         if self._embedding_detector:
             embed_result = self._embedding_detector.scan(question)
             if embed_result.blocked:
-                raise QueryBlocked(
-                    reason="embedding_similarity",
-                    details={
-                        "similarity": round(embed_result.max_similarity, 3),
-                        "matched_pattern": embed_result.matched_pattern,
-                    },
+                details = {
+                    "similarity": round(embed_result.max_similarity, 3),
+                    "matched_pattern": embed_result.matched_pattern,
+                }
+                log_denial(
+                    request_id=request_id, user_id=user_id,
+                    layer="embedding_detector", reason="embedding_similarity",
+                    question=question, details=details,
                 )
+                raise QueryBlocked(reason="embedding_similarity", details=details)
 
         # Layer 4: Access-controlled retrieval
         source_docs = self._retriever.query(question, user_id=user_id)
@@ -167,6 +184,12 @@ class SecureRAGChain:
         if self._output_scanner:
             output_result = self._output_scanner.scan(answer, question=question)
             if output_result.flagged:
+                log_denial(
+                    request_id=request_id, user_id=user_id,
+                    layer="output_scanner", reason="output_flagged",
+                    question=question,
+                    details={"reasons": output_result.reasons},
+                )
                 raise OutputFlagged(reasons=output_result.reasons)
 
         return {

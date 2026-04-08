@@ -1,13 +1,25 @@
 """Per-user sliding-window rate limiter."""
 
+import os
 import time
 from collections import defaultdict
 from threading import Lock
 
-# TEMP: Rate limit relaxed to 100k/10min for Garak/PromptFoo security testing.
-# Production default should be 10 requests per 60 seconds.
-DEFAULT_MAX_REQUESTS = 100_000
-DEFAULT_WINDOW_SECONDS = 600
+# Production defaults
+_PROD_MAX_REQUESTS = 10
+_PROD_WINDOW_SECONDS = 60
+
+# Test mode for security scanning (Garak, PromptFoo)
+_TEST_MAX_REQUESTS = 100_000
+_TEST_WINDOW_SECONDS = 600
+
+
+def _is_test_mode() -> bool:
+    return os.environ.get("SECURERAG_RATE_MODE", "").lower() == "test"
+
+
+DEFAULT_MAX_REQUESTS = _TEST_MAX_REQUESTS if _is_test_mode() else _PROD_MAX_REQUESTS
+DEFAULT_WINDOW_SECONDS = _TEST_WINDOW_SECONDS if _is_test_mode() else _PROD_WINDOW_SECONDS
 
 
 class RateLimitExceeded(Exception):

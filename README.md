@@ -2,7 +2,7 @@
 
 A security-hardened RAG pipeline that treats the LLM as an untrusted component. Documents are sanitized before they hit the vector store, queries are scanned for injection attempts, and responses are filtered before reaching the user. Dockerized for one-command deployment. Built with LangChain, ChromaDB, Presidio, FastAPI, and Ollama (LLaMA 3.1 8B).
 
-> **Note:** Rate limiting is currently set to 100,000 requests per 10 minutes to allow unthrottled security testing with Garak and PromptFoo. Production default is 10 requests per 60 seconds. See the `TEMP` comments in `src/rate_limiter.py` and `src/chain.py`.
+> **Rate limiting** defaults to 10 requests per 60 seconds (production). Set `SECURERAG_RATE_MODE=test` for security scanning (100k/10min). Model integrity is verified at startup via `SECURERAG_MODEL_DIGEST` (optional).
 
 ### Security Scan Results
 
@@ -85,6 +85,14 @@ The `user_id` determines what the retriever is allowed to return. An IC sees pol
 
 - `GET /health` — liveness check
 - `POST /query` — accepts `{"question": "...", "user_id": "..."}`. Returns 400 if input injection detected, 422 if output flagged, 429 if rate-limited.
+
+### Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
+| `SECURERAG_RATE_MODE` | (unset = production) | Set to `test` for relaxed rate limits (100k/10min) |
+| `SECURERAG_MODEL_DIGEST` | (unset = skip check) | Pin Ollama model digest prefix. Startup fails on mismatch. |
 
 ### Tests
 

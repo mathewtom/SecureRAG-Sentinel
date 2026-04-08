@@ -58,3 +58,29 @@ class TestRateLimiter:
 
         with pytest.raises(RateLimitExceeded, match="E003"):
             limiter.check("E003")
+
+
+class TestRateLimiterModeSelection:
+
+    def test_production_defaults(self, monkeypatch) -> None:
+        monkeypatch.delenv("SECURERAG_RATE_MODE", raising=False)
+        import importlib
+        import src.rate_limiter as rl_mod
+        importlib.reload(rl_mod)
+        assert rl_mod.DEFAULT_MAX_REQUESTS == 10
+        assert rl_mod.DEFAULT_WINDOW_SECONDS == 60
+
+    def test_test_mode_defaults(self, monkeypatch) -> None:
+        monkeypatch.setenv("SECURERAG_RATE_MODE", "test")
+        import importlib
+        import src.rate_limiter as rl_mod
+        importlib.reload(rl_mod)
+        assert rl_mod.DEFAULT_MAX_REQUESTS == 100_000
+        assert rl_mod.DEFAULT_WINDOW_SECONDS == 600
+
+    def test_test_mode_case_insensitive(self, monkeypatch) -> None:
+        monkeypatch.setenv("SECURERAG_RATE_MODE", "Test")
+        import importlib
+        import src.rate_limiter as rl_mod
+        importlib.reload(rl_mod)
+        assert rl_mod.DEFAULT_MAX_REQUESTS == 100_000
