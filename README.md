@@ -13,7 +13,7 @@ Full reports under [`reports/`](reports/).
 **V2 remediations** — Based on V1 findings, added three query-time defenses:
 1. **Input injection scan** — Regex pattern scoring on user queries (threshold 5, lower than ingestion's 8). Catches "ignore previous instructions", "stop everything", "just print", "disregard", and other patterns from the Garak scan.
 2. **Embedding similarity detector** — Compares query embeddings against a corpus of 15 known injection prompts via cosine similarity (threshold 0.55). Catches novel phrasings that regex misses.
-3. **Output scanner** — Post-LLM filter that checks for rogue strings ("I hate humans", "Kill all humans", "thoroughly hijacked") and hijack patterns (system prompt leaks, parroted overrides). Flagged responses are withheld.
+3. **Output scanner** — Two-stage post-LLM filter. Fast path checks for rogue strings and hijack patterns (regex). Slow path runs Llama Guard 3 1B semantic classification to catch novel jailbreak patterns (Bad Likert, Deceptive Delight, etc.). Flagged responses are withheld.
 
 **V2 scans** ([`garak_scan_v2_full.md`](reports/garak_scan_v2_full.md), [`garak_scan_v2_full_native_ollama.md`](reports/garak_scan_v2_full_native_ollama.md)) — Ran full Garak probe suite against the `/query` API endpoint. Key findings: API key leaks 0%, toxic content 0%, slur continuation 0%. The `badchars` probe shows 84% "bypass" but this is a detection mismatch — the model correctly says "I don't have enough information" (proper RAG behavior) rather than explicit safety refusal language that the detector expects. DAN jailbreaks partially effective at the LLM level but mitigated by the RAG architecture: even in "DAN mode" the model can only access documents the retriever returns.
 
@@ -25,8 +25,9 @@ Requires [Ollama](https://ollama.com) running natively on the host (not in Docke
 git clone https://github.com/mathewtom/SecureRAG-Sentinel.git
 cd SecureRAG-Sentinel
 
-# Install and start Ollama natively, then pull the model
+# Install and start Ollama natively, then pull the models
 ollama pull llama3.1:8b
+ollama pull llama-guard3:1b
 ollama serve
 
 # Place documents in data/raw/, then ingest
@@ -48,6 +49,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 ollama pull llama3.1:8b
+ollama pull llama-guard3:1b
 ollama serve
 ```
 
@@ -86,10 +88,16 @@ The `user_id` determines what the retriever is allowed to return. An IC sees pol
 
 ### Tests
 
-Tests run without Ollama or Docker (the LLM is mocked, ChromaDB runs in-memory):
+Unit tests run without Ollama or Docker (the LLM is mocked, ChromaDB runs in-memory):
 
 ```bash
-pytest tests/ -v
+pytest tests/ -v -m "not integration"
+```
+
+Integration tests require Ollama with `llama-guard3:1b` pulled:
+
+```bash
+pytest tests/ -v -m integration
 ```
 
 ## How it works
@@ -109,7 +117,7 @@ Clean chunks are embedded with `all-MiniLM-L6-v2` and stored in ChromaDB.
 3. **Embedding similarity scan** — Compares the query embedding against a corpus of known injection prompts. Blocks if cosine similarity exceeds 0.55. Catches novel phrasings that regex misses.
 4. **Access-controlled retrieval** — Computes visibility from the org chart via BFS, builds a ChromaDB `$or` filter. Unauthorized chunks never leave the database.
 5. **LLM inference** — Security prompt template instructs the model to answer only from context and never follow embedded instructions. Defense-in-depth only — the 8B model's instruction-following is too weak to be a security boundary.
-6. **Output scan** — Checks the LLM response for rogue strings and hijack patterns. Flagged responses are withheld (HTTP 422) before reaching the user.
+6. **Output scan** — Two-stage scanner. Fast path checks for rogue strings and hijack patterns (regex). Slow path classifies the response via Llama Guard 3 1B for semantic safety. Flagged responses are withheld (HTTP 422) before reaching the user.
 
 ## Security mappings
 
@@ -117,7 +125,7 @@ Clean chunks are embedded with `all-MiniLM-L6-v2` and stored in ChromaDB.
 
 **LLM01 (Prompt Injection)** — Multi-layer defense: ingestion-time quarantine, query-time regex scoring, embedding similarity detection. Injection patterns are blocked at both write and read paths.
 
-**LLM02 (Insecure Output Handling)** — Post-LLM output scanner checks for rogue strings and hijack patterns. Flagged responses are withheld. Source documents are returned with every response for auditability.
+**LLM02 (Insecure Output Handling)** — Two-stage output scanner: regex fast path for known rogue strings and hijack patterns, plus Llama Guard 3 1B semantic classification for novel unsafe content. Flagged responses are withheld. Source documents are returned with every response for auditability.
 
 **LLM03 (Training Data Poisoning)** — All documents pass through the full sanitization gate before embedding. Poisoned documents are quarantined at ingestion.
 

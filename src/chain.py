@@ -87,7 +87,7 @@ def build_chain(
         rate_limiter=RateLimiter(max_requests, window_seconds),
         injection_scanner=InjectionScanner(threshold=_QUERY_INJECTION_THRESHOLD),
         embedding_detector=EmbeddingInjectionDetector(embedding_function=embeddings),
-        output_scanner=OutputScanner(),
+        output_scanner=OutputScanner(enable_semantic=True),
     )
 
 
@@ -99,7 +99,7 @@ class SecureRAGChain:
     Layer 3: Embedding similarity scan (cosine vs known injection corpus)
     Layer 4: Access-controlled retrieval (org-chart filtering)
     Layer 5: LLM inference (security prompt template)
-    Layer 6: Output scan (rogue string and hijack pattern detection)
+    Layer 6: Output scan (regex fast path + Llama Guard semantic classifier)
     """
 
     def __init__(
@@ -161,7 +161,7 @@ class SecureRAGChain:
 
         # Layer 6: Output scan
         if self._output_scanner:
-            output_result = self._output_scanner.scan(answer)
+            output_result = self._output_scanner.scan(answer, question=question)
             if output_result.flagged:
                 raise OutputFlagged(reasons=output_result.reasons)
 

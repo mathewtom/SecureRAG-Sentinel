@@ -9,5 +9,6 @@ pytest
 pytest-cov
 pypdf
 ollama
+httpx
 fastapi
 uvicorn
