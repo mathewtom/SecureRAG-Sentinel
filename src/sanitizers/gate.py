@@ -9,6 +9,8 @@ from langchain_core.runnables import RunnableLambda
 from src.sanitizers.injection_scanner import InjectionScanner
 from src.sanitizers.pii_detector import PIIDetector
 
+_INGESTION_EMBEDDING_THRESHOLD = 0.50
+
 
 @dataclass
 class GateResult:
@@ -20,22 +22,29 @@ class GateResult:
 
 
 class SanitizationGate:
-    """Three-phase scan pipeline: injection → PII → credentials.
+    """Four-phase scan pipeline: regex injection → embedding similarity → PII → credentials.
 
-    Injection hits quarantine immediately and skip remaining scans.
+    Injection or embedding hits quarantine immediately and skip remaining scans.
     Clean documents are stamped with sanitized=True and a UTC timestamp.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, embedding_function=None) -> None:
         self._injection_scanner = InjectionScanner()
         self._pii_detector = PIIDetector()
+        self._embedding_detector = None
+        if embedding_function is not None:
+            from src.sanitizers.embedding_detector import EmbeddingInjectionDetector
+            self._embedding_detector = EmbeddingInjectionDetector(
+                embedding_function=embedding_function,
+                threshold=_INGESTION_EMBEDDING_THRESHOLD,
+            )
 
     def process(self, documents: list[Document]) -> GateResult:
         """Run all documents through the scan pipeline."""
         result = GateResult()
 
         for doc in documents:
-            # Phase 1: Injection — quarantine and short-circuit
+            # Phase 1: Regex injection — quarantine and short-circuit
             injection_result = self._injection_scanner.scan(doc.page_content)
             if injection_result.blocked:
                 doc.metadata["quarantine_reason"] = "injection"
@@ -43,6 +52,16 @@ class SanitizationGate:
                 doc.metadata["injection_matches"] = str(injection_result.matches)
                 result.quarantined.append(doc)
                 continue
+
+            # Phase 1.5: Embedding similarity — catches latent injections that evade regex
+            if self._embedding_detector is not None:
+                embed_result = self._embedding_detector.scan(doc.page_content)
+                if embed_result.blocked:
+                    doc.metadata["quarantine_reason"] = "embedding_similarity"
+                    doc.metadata["similarity_score"] = round(embed_result.max_similarity, 3)
+                    doc.metadata["matched_pattern"] = embed_result.matched_pattern
+                    result.quarantined.append(doc)
+                    continue
 
             # Phase 2: PII — redact in-place
             pii_result = self._pii_detector.scan(doc.page_content)

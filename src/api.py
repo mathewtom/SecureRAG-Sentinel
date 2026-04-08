@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.chain import build_chain, SecureRAGChain, QueryBlocked, OutputFlagged
 from src.rate_limiter import RateLimitExceeded
@@ -22,8 +22,8 @@ app = FastAPI(title="SecureRAG-Sentinel", lifespan=lifespan)
 
 
 class QueryRequest(BaseModel):
-    question: str
-    user_id: str
+    question: str = Field(..., min_length=1, max_length=2000)
+    user_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class SourceDocument(BaseModel):

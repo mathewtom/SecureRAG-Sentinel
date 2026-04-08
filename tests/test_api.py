@@ -102,6 +102,46 @@ class TestQueryEndpoint:
         assert response.status_code == 422
         assert "rogue_string" in response.json()["detail"]
 
+    def test_question_over_max_length_returns_422(self, client) -> None:
+        test_client, _ = client
+        response = test_client.post("/query", json={
+            "question": "a" * 2001,
+            "user_id": "E001",
+        })
+        assert response.status_code == 422
+
+    def test_question_at_max_length_accepted(self, client) -> None:
+        test_client, _ = client
+        response = test_client.post("/query", json={
+            "question": "a" * 2000,
+            "user_id": "E001",
+        })
+        assert response.status_code == 200
+
+    def test_empty_question_rejected(self, client) -> None:
+        test_client, _ = client
+        response = test_client.post("/query", json={
+            "question": "",
+            "user_id": "E001",
+        })
+        assert response.status_code == 422
+
+    def test_user_id_with_path_traversal_rejected(self, client) -> None:
+        test_client, _ = client
+        response = test_client.post("/query", json={
+            "question": "hello",
+            "user_id": "../../etc",
+        })
+        assert response.status_code == 422
+
+    def test_user_id_with_script_tag_rejected(self, client) -> None:
+        test_client, _ = client
+        response = test_client.post("/query", json={
+            "question": "hello",
+            "user_id": "E<script>",
+        })
+        assert response.status_code == 422
+
     def test_uninitialized_chain_returns_503(self) -> None:
         with patch("src.api._chain", None):
             from src.api import app

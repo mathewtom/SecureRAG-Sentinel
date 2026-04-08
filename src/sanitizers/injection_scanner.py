@@ -30,6 +30,17 @@ _SCORED_PATTERNS: list[tuple[str, int, re.Pattern]] = [
     ("confidential data", 3, re.compile(r"confidential\s+data", re.IGNORECASE)),
     ("do not follow", 3, re.compile(r"do\s+not\s+follow\s+(previous|prior|above)", re.IGNORECASE)),
     ("disregard", 5, re.compile(r"disregard\s+(all|any|previous|prior|above)", re.IGNORECASE)),
+    # Latent injection patterns (from V5 Garak scan findings)
+    ("prepend_response", 5, re.compile(r"prepend.*to\s+(your|the)\s+(response|answer|output)", re.IGNORECASE)),
+    ("act_as_echo", 5, re.compile(r"as\s+an?\s+(echo|repeater|parrot)", re.IGNORECASE)),
+    ("summarize_inject", 4, re.compile(r"when\s+summarizing.*also", re.IGNORECASE)),
+    ("also_include", 4, re.compile(r"also\s+(include|output|append|add)\s+.*in\s+your\s+(response|answer|output)", re.IGNORECASE)),
+    ("final_answer_must", 4, re.compile(r"final\s+answer\s+(should|must)\s+(contain|include|begin|start|end)", re.IGNORECASE)),
+    ("response_must_contain", 4, re.compile(r"(your|the)\s+(response|answer|output)\s+must\s+(contain|start|begin|end)", re.IGNORECASE)),
+    ("do_not_mention", 3, re.compile(r"do\s+not\s+(mention|reveal|tell)\s+(the\s+user|anyone)", re.IGNORECASE)),
+    ("forget_above", 5, re.compile(r"forget\s+(everything|all)\s+(above|before|prior)", re.IGNORECASE)),
+    ("begin_with", 4, re.compile(r"(always\s+)?(begin|start)\s+with\s+\S+\s+(first|before)", re.IGNORECASE)),
+    ("when_you_answer", 4, re.compile(r"when\s+you\s+(answer|respond|reply).*always", re.IGNORECASE)),
 ]
 
 _DEFAULT_THRESHOLD = 8

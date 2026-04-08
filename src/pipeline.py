@@ -49,7 +49,8 @@ def run_pipeline(
     chunks = splitter.split_documents(documents)
     logger.info("Split into %d chunks", len(chunks))
 
-    gate = SanitizationGate()
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    gate = SanitizationGate(embedding_function=embeddings)
     gate_result = gate.process(chunks)
     logger.info(
         "Gate results: %d clean, %d quarantined, %d PII redacted",
@@ -59,7 +60,6 @@ def run_pipeline(
     )
 
     if gate_result.clean:
-        embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
         client = chromadb.PersistentClient(path=str(chroma_persist_dir))
 
         try:
