@@ -62,7 +62,7 @@ class OutputScanner:
         enable_semantic: bool = False,
         ollama_host: str | None = None,
         guard_model: str = "llama-guard3:1b",
-        timeout_seconds: float = 5.0,
+        timeout_seconds: float = 30.0,
     ) -> None:
         self._rogue_strings = _ROGUE_STRINGS + (extra_rogue_strings or [])
         self._enable_semantic = enable_semantic

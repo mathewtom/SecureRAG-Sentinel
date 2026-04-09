@@ -94,6 +94,7 @@ The API hardcodes the requester to a low-privilege Software Engineer (E003 = Pri
 | `SECURERAG_RATE_MODE` | (unset = production) | Set to `test` for relaxed rate limits (100k/10min) |
 | `SECURERAG_MODEL_DIGEST` | (unset = skip check) | Pin Ollama model digest prefix. Startup fails on mismatch. |
 | `SECURERAG_DEMO_USER` | `E003` | Hardcoded user identity for the API (models an authenticated low-privilege engineer). |
+| `SECURERAG_NUM_CTX` | `8192` | Ollama context window size in tokens. Lower values keep VRAM usage bounded so multiple models can stay loaded simultaneously. |
 
 ### Tests
 

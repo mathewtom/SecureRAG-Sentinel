@@ -93,7 +93,16 @@ def build_chain(
     client = chromadb.PersistentClient(path=chroma_persist_dir)
     collection = client.get_collection(name=collection_name)
     embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
-    llm = Ollama(model=model_name, **({"base_url": ollama_host} if ollama_host else {}))
+
+    # Cap context window to keep VRAM usage bounded. RAG retrieves ~5 chunks
+    # of 500 chars each (~2500 tokens), so 8K is plenty with headroom for the
+    # prompt template and response. Default Ollama context (256K) would
+    # consume ~60GB of KV cache and prevent Llama Guard from staying loaded.
+    num_ctx = int(os.environ.get("SECURERAG_NUM_CTX", "8192"))
+    llm_kwargs: dict = {"num_ctx": num_ctx}
+    if ollama_host:
+        llm_kwargs["base_url"] = ollama_host
+    llm = Ollama(model=model_name, **llm_kwargs)
 
     retriever = AccessControlledRetriever(
         collection=collection,
