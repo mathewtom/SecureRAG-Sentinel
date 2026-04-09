@@ -67,7 +67,7 @@ To query via the API:
 ```bash
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is our vacation policy?", "user_id": "E003"}'
+  -d '{"question": "What is our vacation policy?"}'
 ```
 
 Or directly from Python:
@@ -79,12 +79,12 @@ chain = build_chain()
 result = chain.query("What is our vacation policy?", user_id="E003")
 ```
 
-The `user_id` determines what the retriever is allowed to return. An IC sees policies and their own HR record. A VP sees everything. Unknown users get nothing.
+The API hardcodes the requester to a low-privilege Software Engineer (E003 = Priya Patel) by default. This models a "lowly engineer signed in via SSO" persona — adversarial testing tools cannot self-elevate by spoofing `user_id` in the request body. Override via the `SECURERAG_DEMO_USER` environment variable. Programmatic chain access (the Python example above) bypasses the API and accepts any `user_id` directly. The retriever enforces three-dimensional access control: org-chart for HR records, department membership for classified documents, public for policies.
 
 ### API Endpoints
 
 - `GET /health` — liveness check
-- `POST /query` — accepts `{"question": "...", "user_id": "..."}`. Returns 400 if input injection detected, 422 if output flagged, 429 if rate-limited.
+- `POST /query` — accepts `{"question": "..."}`. The requesting identity is hardcoded server-side (default `E003`, override with `SECURERAG_DEMO_USER`). Returns 400 if input injection detected, 422 if output flagged, 429 if rate-limited.
 
 ### Environment Variables
 
@@ -93,6 +93,7 @@ The `user_id` determines what the retriever is allowed to return. An IC sees pol
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint |
 | `SECURERAG_RATE_MODE` | (unset = production) | Set to `test` for relaxed rate limits (100k/10min) |
 | `SECURERAG_MODEL_DIGEST` | (unset = skip check) | Pin Ollama model digest prefix. Startup fails on mismatch. |
+| `SECURERAG_DEMO_USER` | `E003` | Hardcoded user identity for the API (models an authenticated low-privilege engineer). |
 
 ### Tests
 

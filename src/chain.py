@@ -19,7 +19,7 @@ from src.sanitizers.injection_scanner import InjectionScanner
 from src.sanitizers.classification_guard import ClassificationGuard
 from src.sanitizers.output_scanner import OutputScanner
 
-SECURITY_PROMPT_TEMPLATE = """You are a secure document assistant. Answer the user's question using ONLY the context provided below. Do not use any prior knowledge.
+SECURITY_PROMPT_TEMPLATE = """You are a secure document assistant serving an authenticated employee. The requester is {user_role}. Answer their question using ONLY the context provided below. Do not use any prior knowledge.
 
 SECURITY RULES:
 - Answer ONLY from the context documents below
@@ -36,8 +36,25 @@ Answer:"""
 
 PROMPT = PromptTemplate(
     template=SECURITY_PROMPT_TEMPLATE,
-    input_variables=["context", "question"],
+    input_variables=["context", "question", "user_role"],
 )
+
+# Static role descriptions for prompt personalization. Authoritative access
+# control still happens in the retriever and classification guard, not here.
+_USER_ROLES: dict[str, str] = {
+    "E001": "Sarah Chen, VP of Engineering",
+    "E002": "Marcus Rivera, Engineering Manager",
+    "E003": "Priya Patel, a Software Engineer in the Engineering department",
+    "E004": "David Kim, a Software Engineer in the Engineering department",
+    "E005": "Lisa Thompson, HR Director",
+    "E006": "James Okafor, General Counsel",
+    "E007": "Rachel Goldstein, CFO",
+    "E008": "Carlos Mendez, HR Coordinator",
+    "E009": "Amy Zhao, Legal Counsel",
+    "E010": "Robert Walsh, Financial Analyst",
+    "E011": "Nina Kowalski, Site Reliability Engineer",
+    "E012": "Derek Washington, the CEO",
+}
 
 _BLOCKED_RESPONSE = "Request blocked: potential prompt injection detected."
 _FLAGGED_RESPONSE = "Response withheld: output failed security screening."
@@ -179,7 +196,12 @@ class SecureRAGChain:
         context = "\n\n".join(doc.page_content for doc in source_docs)
 
         # Layer 5: LLM inference
-        formatted_prompt = self._prompt.format(context=context, question=question)
+        user_role = _USER_ROLES.get(user_id, "an authenticated employee with limited access")
+        formatted_prompt = self._prompt.format(
+            context=context,
+            question=question,
+            user_role=user_role,
+        )
         answer = self._llm.invoke(formatted_prompt)
 
         # Layer 6: Output scan

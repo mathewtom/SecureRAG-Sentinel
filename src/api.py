@@ -1,5 +1,6 @@
 """FastAPI wrapper for the SecureRAG chain."""
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -7,6 +8,12 @@ from pydantic import BaseModel, Field
 
 from src.chain import build_chain, SecureRAGChain, QueryBlocked, OutputFlagged
 from src.rate_limiter import RateLimitExceeded
+
+# Hardcoded demo user identity. In production, an upstream proxy would
+# authenticate the request and inject a verified user_id. We hardcode to
+# a low-privilege Software Engineer (E003) so adversarial testing tools
+# cannot self-elevate privileges via the request body.
+DEMO_USER_ID = os.environ.get("SECURERAG_DEMO_USER", "E003")
 
 _chain: SecureRAGChain | None = None
 
@@ -23,7 +30,6 @@ app = FastAPI(title="SecureRAG-Sentinel", lifespan=lifespan)
 
 class QueryRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
-    user_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class SourceDocument(BaseModel):
@@ -38,7 +44,7 @@ class QueryResponse(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "chain_loaded": _chain is not None}
+    return {"status": "ok", "chain_loaded": _chain is not None, "demo_user": DEMO_USER_ID}
 
 
 @app.post("/query", response_model=QueryResponse)
@@ -47,7 +53,7 @@ def query(request: QueryRequest) -> QueryResponse:
         raise HTTPException(status_code=503, detail="Chain not initialized")
 
     try:
-        result = _chain.query(request.question, user_id=request.user_id)
+        result = _chain.query(request.question, user_id=DEMO_USER_ID)
     except RateLimitExceeded as exc:
         raise HTTPException(
             status_code=429,
