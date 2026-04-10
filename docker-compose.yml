@@ -26,6 +26,13 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - OLLAMA_HOST=http://host.docker.internal:11434
+      # Dev/test default: rate limiter fully disabled. Security scans
+      # (Garak, promptfoo iterative red-team) fire hundreds of requests
+      # per minute and need a clean signal — a 10/60s production limit
+      # would turn every attack after the first 10 into a [RATE_LIMITED]
+      # response and mask real defense-layer behavior. For prod, unset
+      # or override to prod mode with a separate compose.prod.yml.
+      - SECURERAG_RATE_MODE=test
 
 volumes:
   chroma_data:

@@ -70,17 +70,39 @@ class TestRateLimiterModeSelection:
         assert rl_mod.DEFAULT_MAX_REQUESTS == 10
         assert rl_mod.DEFAULT_WINDOW_SECONDS == 60
 
-    def test_test_mode_defaults(self, monkeypatch) -> None:
+    def test_test_mode_disables_limiter(self, monkeypatch) -> None:
+        """Test mode: default construction disables the limiter entirely."""
         monkeypatch.setenv("SECURERAG_RATE_MODE", "test")
         import importlib
         import src.rate_limiter as rl_mod
         importlib.reload(rl_mod)
-        assert rl_mod.DEFAULT_MAX_REQUESTS == 100_000
-        assert rl_mod.DEFAULT_WINDOW_SECONDS == 600
+        assert rl_mod.DEFAULT_MAX_REQUESTS is None
+
+        # A default-constructed limiter should no-op on check(), even under
+        # bursts that would trip any prod-sized window.
+        limiter = rl_mod.RateLimiter()
+        for _ in range(1000):
+            limiter.check("E003")
 
     def test_test_mode_case_insensitive(self, monkeypatch) -> None:
         monkeypatch.setenv("SECURERAG_RATE_MODE", "Test")
         import importlib
         import src.rate_limiter as rl_mod
         importlib.reload(rl_mod)
-        assert rl_mod.DEFAULT_MAX_REQUESTS == 100_000
+        assert rl_mod.DEFAULT_MAX_REQUESTS is None
+
+    def test_explicit_construction_still_enforces_in_test_mode(self, monkeypatch) -> None:
+        """Even in test mode, explicit max_requests still enforces a limit.
+
+        Unit tests of the mechanism pass their own limits and must keep working.
+        """
+        monkeypatch.setenv("SECURERAG_RATE_MODE", "test")
+        import importlib
+        import src.rate_limiter as rl_mod
+        importlib.reload(rl_mod)
+
+        limiter = rl_mod.RateLimiter(max_requests=3, window_seconds=60)
+        for _ in range(3):
+            limiter.check("E003")
+        with pytest.raises(rl_mod.RateLimitExceeded):
+            limiter.check("E003")

@@ -9,17 +9,19 @@ from threading import Lock
 _PROD_MAX_REQUESTS = 10
 _PROD_WINDOW_SECONDS = 60
 
-# Test mode for security scanning (Garak, PromptFoo)
-_TEST_MAX_REQUESTS = 100_000
-_TEST_WINDOW_SECONDS = 600
-
 
 def _is_test_mode() -> bool:
     return os.environ.get("SECURERAG_RATE_MODE", "").lower() == "test"
 
 
-DEFAULT_MAX_REQUESTS = _TEST_MAX_REQUESTS if _is_test_mode() else _PROD_MAX_REQUESTS
-DEFAULT_WINDOW_SECONDS = _TEST_WINDOW_SECONDS if _is_test_mode() else _PROD_WINDOW_SECONDS
+# In test mode (SECURERAG_RATE_MODE=test), default construction disables
+# the limiter entirely — `check()` becomes a no-op. This is what dev and
+# security-scan runs (Garak, promptfoo iterative red-team) want: hundreds
+# of requests per minute with zero 429s masking real defense behavior.
+# Explicit construction `RateLimiter(max_requests=N, ...)` is unaffected,
+# so unit tests of the mechanism still pass their own limits.
+DEFAULT_MAX_REQUESTS: int | None = None if _is_test_mode() else _PROD_MAX_REQUESTS
+DEFAULT_WINDOW_SECONDS: float = _PROD_WINDOW_SECONDS
 
 
 class RateLimitExceeded(Exception):
@@ -43,7 +45,7 @@ class RateLimiter:
 
     def __init__(
         self,
-        max_requests: int = DEFAULT_MAX_REQUESTS,
+        max_requests: int | None = DEFAULT_MAX_REQUESTS,
         window_seconds: float = DEFAULT_WINDOW_SECONDS,
     ) -> None:
         self._max_requests = max_requests
@@ -52,7 +54,14 @@ class RateLimiter:
         self._lock = Lock()
 
     def check(self, user_id: str) -> None:
-        """Check if user_id is within rate limits. Raises RateLimitExceeded if not."""
+        """Check if user_id is within rate limits. Raises RateLimitExceeded if not.
+
+        If max_requests is None (test mode default), the limiter is disabled
+        and all requests pass through without bookkeeping.
+        """
+        if self._max_requests is None:
+            return
+
         now = time.monotonic()
         cutoff = now - self._window_seconds
 
