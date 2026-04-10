@@ -11,6 +11,7 @@ import pytest
 from src.chain import PROMPT, QueryBlocked, SecureRAGChain
 from src.pipeline import run_pipeline
 from src.retrieval.access_controlled import AccessControlledRetriever
+from src.sanitizers.credential_detector import CredentialDetector
 from src.sanitizers.injection_scanner import InjectionScanner
 
 
@@ -132,6 +133,94 @@ class TestSecureRAGChain:
         call_args = self.mock_llm.invoke.call_args[0][0]
         assert "SECURITY RULES" in call_args
         assert "vacation policy" in call_args.lower()
+
+    def test_credential_in_llm_answer_is_redacted(self) -> None:
+        """If the LLM reproduces an AWS key in its answer, the output-time
+        scrub must redact it before returning. This regression-tests the
+        2/165 cases from promptfoo V1 pipeline where the LLM itself leaked."""
+        self.mock_llm.invoke.return_value = (
+            "The production key is AKIA3XYZVENDOR9876PROD per the vendor doc."
+        )
+        chain = SecureRAGChain(
+            retriever=AccessControlledRetriever(
+                collection=self.collection,
+                embedding_function=self.embeddings,
+            ),
+            llm=self.mock_llm,
+            prompt=PROMPT,
+            credential_detector=CredentialDetector(),
+        )
+        result = chain.query("vendor key", user_id="E003")
+
+        assert "AKIA3XYZVENDOR9876PROD" not in result["answer"]
+        assert "[AWS_ACCESS_KEY_REDACTED]" in result["answer"]
+
+    def test_credential_in_source_documents_is_redacted(self) -> None:
+        """If a retrieved chunk contains a credential (because ingestion
+        sanitizer didn't catch it, or content predates the credential
+        detector), the output-time scrub must redact it in source_documents
+        before returning. This regression-tests the 79/165 cases from
+        promptfoo V1 pipeline where the LLM refused but the API still
+        shipped the credential in source_documents[]."""
+        # Add a chunk with a credential that bypassed ingestion. Use a
+        # separate collection so we don't pollute the class fixture.
+        leaky_client = chromadb.Client()
+        leaky_collection = leaky_client.create_collection(
+            name="test_chain_leak",
+            metadata={"hnsw:space": "cosine"},
+        )
+        leaky_text = (
+            "Vendor security assessment Q1 2026. "
+            "API Keys (rotate quarterly): Production: AKIA3XYZVENDOR9876PROD"
+        )
+        leaky_collection.add(
+            documents=[leaky_text],
+            metadatas=[{
+                "filename": "vendor_security_assessment.txt",
+                # E003 is in Engineering — she's authorized to retrieve this
+                # chunk. The credential leak is what we want the scrub to catch.
+                "classification": "engineering_confidential",
+            }],
+            ids=["leak_0"],
+            embeddings=self.embeddings.embed_documents([leaky_text]),
+        )
+
+        chain = SecureRAGChain(
+            retriever=AccessControlledRetriever(
+                collection=leaky_collection,
+                embedding_function=self.embeddings,
+            ),
+            llm=self.mock_llm,
+            prompt=PROMPT,
+            credential_detector=CredentialDetector(),
+        )
+        try:
+            result = chain.query("vendor production key", user_id="E003")
+
+            for doc in result["source_documents"]:
+                assert "AKIA3XYZVENDOR9876PROD" not in doc.page_content
+            assert any(
+                "[AWS_ACCESS_KEY_REDACTED]" in doc.page_content
+                for doc in result["source_documents"]
+            )
+        finally:
+            leaky_client.delete_collection("test_chain_leak")
+
+    def test_credential_scrub_noop_when_no_credentials(self) -> None:
+        """The credential scrub must not modify clean responses."""
+        clean_answer = "The vacation policy allows 15 days PTO."
+        self.mock_llm.invoke.return_value = clean_answer
+        chain = SecureRAGChain(
+            retriever=AccessControlledRetriever(
+                collection=self.collection,
+                embedding_function=self.embeddings,
+            ),
+            llm=self.mock_llm,
+            prompt=PROMPT,
+            credential_detector=CredentialDetector(),
+        )
+        result = chain.query("vacation policy", user_id="E003")
+        assert result["answer"] == clean_answer
 
     def test_nfkc_normalizes_fullwidth_injection(self) -> None:
         chain = SecureRAGChain(

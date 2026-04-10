@@ -51,11 +51,10 @@ _REGEX_PATTERNS: list[tuple[str, re.Pattern, Callable | None]] = [
         re.compile(r"\(?\b\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
         None,
     ),
-    (
-        "AWS_KEY",
-        re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-        None,
-    ),
+    # NOTE: AWS_KEY moved to credential_detector.py with a loosened suffix
+    # ({12,40} instead of {16}) so common test/example formats are also caught.
+    # PIIDetector now handles people/identifying info only; service credentials
+    # live in CredentialDetector and are scanned at gate.py Phase 3.
     (
         "IBAN",
         re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b"),

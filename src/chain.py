@@ -14,6 +14,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from src.rate_limiter import RateLimiter
 from src.retrieval.access_controlled import AccessControlledRetriever
+from src.sanitizers.credential_detector import CredentialDetector
 from src.sanitizers.embedding_detector import EmbeddingInjectionDetector
 from src.sanitizers.injection_scanner import InjectionScanner
 from src.sanitizers.classification_guard import ClassificationGuard
@@ -117,6 +118,7 @@ def build_chain(
         injection_scanner=InjectionScanner(threshold=_QUERY_INJECTION_THRESHOLD),
         embedding_detector=EmbeddingInjectionDetector(embedding_function=embeddings),
         output_scanner=OutputScanner(enable_semantic=True),
+        credential_detector=CredentialDetector(),
     )
 
 
@@ -141,6 +143,7 @@ class SecureRAGChain:
         injection_scanner: InjectionScanner | None = None,
         embedding_detector: EmbeddingInjectionDetector | None = None,
         output_scanner: OutputScanner | None = None,
+        credential_detector: CredentialDetector | None = None,
     ) -> None:
         self._retriever = retriever
         self._llm = llm
@@ -149,6 +152,7 @@ class SecureRAGChain:
         self._injection_scanner = injection_scanner
         self._embedding_detector = embedding_detector
         self._output_scanner = output_scanner
+        self._credential_detector = credential_detector
 
     def query(
         self,
@@ -240,6 +244,41 @@ class SecureRAGChain:
                     details={"leaked": guard_result.leaked_classifications},
                 )
                 raise OutputFlagged(reasons=reasons)
+
+        # Output-side credential scrub (belt-and-suspenders for ingestion-time
+        # redaction). Walks both the LLM answer and every retrieved source
+        # chunk, redacting any matching credentials and audit-logging the hit
+        # with the document filename. Hits indicate either a corpus that was
+        # ingested before this detector existed, or a credential pattern the
+        # detector doesn't yet know about — both worth investigating in ops.
+        if self._credential_detector:
+            ans_result = self._credential_detector.scan(answer)
+            if ans_result.credential_count > 0:
+                log_denial(
+                    request_id=request_id, user_id=user_id,
+                    layer="credential_scrub", reason="credential_in_answer",
+                    question=question,
+                    details={
+                        "categories": sorted(ans_result.categories),
+                        "count": ans_result.credential_count,
+                    },
+                )
+                answer = ans_result.redacted_text
+
+            for doc in source_docs:
+                src_result = self._credential_detector.scan(doc.page_content)
+                if src_result.credential_count > 0:
+                    log_denial(
+                        request_id=request_id, user_id=user_id,
+                        layer="credential_scrub", reason="credential_in_source",
+                        question=question,
+                        details={
+                            "categories": sorted(src_result.categories),
+                            "count": src_result.credential_count,
+                            "filename": doc.metadata.get("filename", "unknown"),
+                        },
+                    )
+                    doc.page_content = src_result.redacted_text
 
         return {
             "answer": answer,

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableLambda
 
+from src.sanitizers.credential_detector import CredentialDetector
 from src.sanitizers.injection_scanner import InjectionScanner
 from src.sanitizers.pii_detector import PIIDetector
 
@@ -31,6 +32,7 @@ class SanitizationGate:
     def __init__(self, embedding_function=None) -> None:
         self._injection_scanner = InjectionScanner()
         self._pii_detector = PIIDetector()
+        self._credential_detector = CredentialDetector()
         self._embedding_detector = None
         if embedding_function is not None:
             from src.sanitizers.embedding_detector import EmbeddingInjectionDetector
@@ -72,10 +74,14 @@ class SanitizationGate:
                 doc.metadata["pii_count"] = pii_result.pii_count
                 result.total_pii_redacted += pii_result.pii_count
 
-            # Phase 3: Credential scan (future)
-            credential_scanner = None
-            if credential_scanner is not None:
-                pass
+            # Phase 3: Credential scan — redact API keys / tokens / private keys
+            cred_result = self._credential_detector.scan(doc.page_content)
+            if cred_result.credential_count > 0:
+                doc.page_content = cred_result.redacted_text
+                doc.metadata["credentials_redacted"] = True
+                doc.metadata["credential_categories"] = str(cred_result.categories)
+                doc.metadata["credential_count"] = cred_result.credential_count
+                result.total_credentials_stripped += cred_result.credential_count
 
             doc.metadata["sanitized"] = True
             doc.metadata["sanitized_at"] = datetime.now(timezone.utc).isoformat()
