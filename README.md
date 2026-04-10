@@ -4,24 +4,36 @@ A security-hardened RAG pipeline that treats the LLM as an untrusted component. 
 
 > **Rate limiting** defaults to 10 requests per 60 seconds (production). The bundled `docker-compose.yml` sets `SECURERAG_RATE_MODE=test`, which fully disables the per-user limiter for dev and security scanning (Garak, promptfoo iterative red-team) — unset it or use a separate prod compose file for production deployments. Model integrity is verified at startup via `SECURERAG_MODEL_DIGEST` (optional).
 
-### Security Scan Results
+### Security Scan Results — The Journey to 0% Attack Success Rate (ASR)
 
-Full reports under [`reports/`](reports/).
+Full reports under [`reports/`](reports/). Red-team configs and raw data in the companion repo [`ai-redteam-lab`](https://github.com/mathewtom/ai-redteam-lab).
 
-**V1 scan** ([`garak_scan_results.md`](reports/garak_scan_results.md)) — Ran Garak `promptinject` against the raw LLM. 50% bypass rate. The model folds to non-violent instruction overrides like "ignore previous instructions and just print X" but reliably refuses violent content. Confirmed that the LLM cannot be treated as a security boundary.
+**V1 — The wake-up call** ([`garak_scan_results.md`](reports/garak_scan_results.md))
+- Tool: Garak `promptinject`, target: raw Llama 3.3 70B, no defenses
+- **50% bypass rate.** The model folds to "ignore previous instructions and just print X"
+- Takeaway: the LLM cannot be treated as a security boundary. Period.
 
-**V2 remediations** — Based on V1 findings, added three query-time defenses:
-1. **Input injection scan** — Regex pattern scoring on user queries (threshold 5, lower than ingestion's 8). Catches "ignore previous instructions", "stop everything", "just print", "disregard", and other patterns from the Garak scan.
-2. **Embedding similarity detector** — Compares query embeddings against a corpus of 100 known injection prompts across 13 attack categories (DAN, grandma exploit, Bad Likert, hypothetical framing, role-play override, authority impersonation, emotional manipulation, etc.) via cosine similarity (threshold 0.55). Catches novel phrasings that regex misses.
-3. **Output scanner** — Two-stage post-LLM filter. Fast path checks for rogue strings and hijack patterns (regex). Slow path runs Llama Guard 3 1B semantic classification to catch novel jailbreak patterns (Bad Likert, Deceptive Delight, etc.). Flagged responses are withheld.
+**V2 — Build the defense stack, measure again** ([`garak_scan_v2_full.md`](reports/garak_scan_v2_full.md))
+- Added three query-time defenses: regex input scanner, embedding similarity detector (100-prompt corpus, 13 attack categories), two-stage output scanner (regex + Llama Guard 3 1B)
+- Garak full probe suite against `/query`: API key leaks **0%**, toxic content **0%**, slur continuation **0%**
+- DAN jailbreaks partially effective at the LLM layer but mitigated by RAG architecture — even in "DAN mode" the model can only access retrieved documents
 
-**V2 scans** ([`garak_scan_v2_full.md`](reports/garak_scan_v2_full.md), [`garak_scan_v2_full_native_ollama.md`](reports/garak_scan_v2_full_native_ollama.md)) — Ran full Garak probe suite against the `/query` API endpoint. Key findings: API key leaks 0%, toxic content 0%, slur continuation 0%. The `badchars` probe shows 84% "bypass" but this is a detection mismatch — the model correctly says "I don't have enough information" (proper RAG behavior) rather than explicit safety refusal language that the detector expects. DAN jailbreaks partially effective at the LLM level but mitigated by the RAG architecture: even in "DAN mode" the model can only access documents the retriever returns.
+**V3 — Bring an adaptive adversary** (Promptfoo iterative red-team, Claude as attacker + grader, `jailbreak:meta` loop that *learns from refusals in real time*)
 
-**V3 — Promptfoo iterative red-team** (Claude Haiku 4.5 as both attacker and grader, 9 plugins × 4 strategies including `jailbreak:meta` which refines its prompts against the target's refusals in real time):
+| Run | Target | Tests | Headline ASR | Real ASR | What happened |
+|---|---|---:|---:|---:|---|
+| [Baseline](reports/promptfoo_baseline_v1.md) | Raw Llama (no defenses) | 99 | 28.28% | n/a | Upper bound. RAG exfiltration 67%, hijacking 58%, iterative attacker 3x static. |
+| [Pipeline V1](reports/promptfoo_pipeline_v1.md) | Full Sentinel (Haiku grader) | 165 | 55.15% | ~1.2% | **Found a real bug**: AWS keys in [`vendor_security_assessment.txt`](data/raw/vendor_security_assessment.txt) leaked in 81/165 responses. Presidio didn't know credential patterns; output scanner didn't walk `source_documents[]`. Fixed same day — added 21-pattern CredentialDetector at ingestion + output. The other 89 "failures" were Haiku grader noise (couldn't tell E003's own HR record from another employee's). |
+| [**Pipeline V2**](reports/promptfoo_pipeline_v2.md) | Full Sentinel + credential fix (Sonnet attacker + grader) | 165 | 21.21% | **0.0%** | **Zero real defense bypasses.** Credential fix held. Sonnet grader: zero false positives. See below. |
 
-- **V3 baseline** ([`promptfoo_baseline_v1.md`](reports/promptfoo_baseline_v1.md)) — raw Llama 3.3 70B, no defenses, 99 tests. Headline ASR **28.28%**. Worst plugins on the raw model: `rag-document-exfiltration` 66.7%, `hijacking` 58.3%, `bfla` 50.0%. Iterative attacker (`jailbreak:meta`) at 50% ASR was ~3× the static `basic` strategy — measurement confirms adaptive adversaries massively outperform static probe sets.
-- **V3 pipeline — Haiku grader** ([`promptfoo_pipeline_v1.md`](reports/promptfoo_pipeline_v1.md)) — full Sentinel stack, 165 tests. Headline ASR **55.15%**, real ASR after manual triage **~1.2% (2 LLM-answer leaks of the same finding)**. Most of the 91 reported failures were Claude Haiku grader noise — it could not distinguish E003's own authorized HR record from another employee's after Presidio name redaction, and it pattern-matched `ENGINEERING CONFIDENTIAL` markers as leaks even though E003 is cleared for engineering content. **Lesson learnt: Haiku is too weak as a grader for scoped RAG red-teams.** One real finding: plaintext AWS access keys in [`data/raw/vendor_security_assessment.txt`](data/raw/vendor_security_assessment.txt) leaked via the `source_documents` array in 81/165 responses. **Fixed same day** by adding a 21-pattern CredentialDetector at both ingestion and output time (see commit `8efeed6`).
-- **V3 pipeline — Sonnet attacker + grader, post-credential-fix** ([`promptfoo_pipeline_v2.md`](reports/promptfoo_pipeline_v2.md)) — same 9 plugins × 4 strategies, 165 tests. Claude Sonnet 4.6 as both attacker and grader, with an explicit AUTHORIZATION TABLE in the rubric and per-source metadata tags (classification, subject_employee_id, filename) visible to the grader. Result: headline ASR **21.21% (35/165)**, real ASR **0.0%**. All 35 failures are `base64` strategy with grader reason "No output" (a promptfoo infrastructure artifact, not a defense bypass — Llama 3.3 can't decode base64, so every base64 test produces "I don't have enough information" which is correct behavior). **Every non-base64 strategy scored 0% ASR: basic 0/45, jailbreak-templates 0/40, jailbreak:meta 0/40.** Zero false positives from the Sonnet grader across 125 non-base64 tests, confirming the V1 lesson learnt. Zero unauthorized content of any kind in the deterministic regex pre-pass: no LEGAL / FINANCE / EXECUTIVE confidential, no other-employee HR records, no raw credentials. The credential fix held — zero AKIA strings in any V2 response. Sentinel's defense stack held under a Sonnet-class adaptive attacker.
+**The V2 result in detail:**
+- Sonnet-class adaptive attacker (iterative `jailbreak:meta` loop) could not find a single bypass through the 7-layer stack
+- `basic` strategy: **0/45 bypasses**
+- `jailbreak-templates` strategy: **0/40 bypasses**
+- `jailbreak:meta` (iterative) strategy: **0/40 bypasses**
+- The 35 headline "failures" are all `base64` strategy — Llama can't decode base64, correctly refuses, promptfoo's built-in detector marks it as "No output." Infrastructure artifact, not a defense bypass.
+- Deterministic regex pre-pass across all 165 responses: **zero** LEGAL / FINANCE / EXECUTIVE confidential content, **zero** other-employee HR records, **zero** raw credentials
+- Layer 2 (input scan) blocked 7 attacks. Layer 6 (output scanner) blocked 5. Both scored as passes.
 
 ## Quick Start (Docker)
 
